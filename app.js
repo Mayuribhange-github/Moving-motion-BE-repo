@@ -1,74 +1,109 @@
 import express from "express";
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 import bodyParser from "body-parser";
-import userRouter from './routes/user.route.js'
-import bookingRouter from './routes/bookings.route.js'
-import driverRouter from './routes/driver.route.js'
+import userRouter from "./routes/user.route.js";
+import bookingRouter from "./routes/bookings.route.js";
+import driverRouter from "./routes/driver.route.js";
+import motionRouter from "./routes/motion.route.js";
 import cors from "cors";
 import fs from "fs";
-import path from 'path';
-import morgan from 'morgan';
-const app = express();
-import dotenv from 'dotenv'
+import path from "path";
+import morgan from "morgan";
+import dotenv from "dotenv";
+import http from "http";
+import { Server } from "socket.io"; // Corrected import for Socket.io
+
 dotenv.config();
-const originalSend = app.response.send
 
-app.response.send = function sendOverWrite(body) {
-    originalSend.call(this, body)
-    this.__custombody__ = body
-}
-app.use(express.static(path.join(process.cwd(), "public")));
-app.use(express.static('images'));
+const app = express();
 const PORT = 4000;
-mongoose.set('strictQuery', true);
-mongoose.connect('mongodb://localhost:27017/moving-motion-mjr-project', err => {
-    if (err)
-        console.log(err);
-    else {
-        let api = {};
-        app.use((req, res, next) => {
-            console.log(api)
-            console.log(req.path)
-            api[req.path] = (api[req.path] ? api[req.path] : 0) + 1;
-            next();
-        })
-        morgan.token('apicount', (req, res) => {
-            console.log(req.originalUrl)
-            return JSON.stringify(api[req.originalUrl])
-        }
 
-        )
-        morgan.token('res-body', (req, res) =>
+// Override express response send function to log response body
+const originalSend = app.response.send;
+app.response.send = function sendOverWrite(body) {
+  originalSend.call(this, body);
+  this.__custombody__ = body;
+};
 
-            JSON.stringify(res.__custombody__),
-        )
-        morgan.token('req-body', (req, res) =>
+// Static file setup
+app.use(express.static(path.join(process.cwd(), "public")));
+app.use(express.static("images"));
 
-            JSON.stringify(req.body),
-        )
-        var accessLogStream = fs.createWriteStream(path.join(process.cwd(), "access.log"), {
-            flags: "a"
-        });
-        // app.use(morgan("combined", { stream: accessLogStream }));
-        app.use(morgan(':date[web] :method :url api-count :apicount request-body= :req-body :status :response-time ms - :res[content-length]- response-body = :res-body -:req[content-length]', {
-            stream: accessLogStream,
-            // skip: function (req, res) { return res.statusCode >= 400 }
-        }));
-        app.use(cors());
-        console.log("mongo-db connected");
-        app.use(bodyParser.json());
-        app.use(bodyParser.urlencoded({ extended: true }));
-        app.use("/user", userRouter);
-        app.use("/driver", driverRouter);
-        app.use("/booking", bookingRouter);
+// MongoDB Connection
+mongoose.set("strictQuery", true);
+mongoose
+  .connect("mongodb://localhost:27017/moving-motion-mjr-project")
+  .then(() => console.log("MongoDB Connected"))
+  .catch((err) => console.log("MongoDB Connection Error:", err));
 
-        // morgan.token('res-body', (_req, res) =>
-        //     JSON.stringify(res.__custombody__),
-        // )
+// API Usage Logger
+const apiUsage = {};
+app.use((req, res, next) => {
+  apiUsage[req.path] = (apiUsage[req.path] || 0) + 1;
+  next();
+});
 
-        // setup the logger 
-        app.listen(PORT, () => {
-            console.log(`Server started at port ${PORT} http://localhost:${PORT}/`);
-        })
+// Morgan Logging Configuration
+morgan.token("apicount", (req) => JSON.stringify(apiUsage[req.originalUrl]));
+morgan.token("res-body", (_req, res) => JSON.stringify(res.__custombody__));
+morgan.token("req-body", (req) => JSON.stringify(req.body));
+
+const accessLogStream = fs.createWriteStream(
+  path.join(process.cwd(), "access.log"),
+  { flags: "a" }
+);
+
+app.use(
+  morgan(
+    ":date[web] :method :url api-count :apicount request-body= :req-body :status :response-time ms - :res[content-length]- response-body = :res-body -:req[content-length]",
+    { stream: accessLogStream }
+  )
+);
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// API Routes
+app.use("/user", userRouter);
+app.use("/driver", driverRouter);
+app.use("/booking", bookingRouter);
+app.use("/motion", motionRouter);
+
+// Create HTTP Server & Attach WebSocket Server
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*" },
+});
+
+// WebSocket Logic: Handle Motion Data
+io.on("connection", (socket) => {
+  console.log("Client connected via WebSocket");
+
+  socket.on("motionData", (data) => {
+    console.log("Received Motion Data:", data);
+
+    let action = "Stationary";
+    if (data.acceleration.x > 0.02 || data.acceleration.y > 0.02) {
+      action = "Move Forward";
     }
+    if (data.gyro.x > 0.005) {
+      action = "Turn Left";
+    } else if (data.gyro.y > 0.005) {
+      action = "Turn Right";
+    }
+
+    // Send action back to the frontend in real-time
+    socket.emit("motionAction", { recommendedAction: action });
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected from WebSocket");
+  });
+});
+
+// Start Server
+server.listen(PORT, () => {
+  console.log(`🚀 Server started at http://localhost:${PORT}/`);
 });

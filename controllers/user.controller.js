@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs';
 import { User } from "../model/user.model.js";
-import jwt from 'jsonwebtoken';
 import { validation } from '../middleware/joiValidation.js';
 
 // import stripe from 'stripe';
@@ -8,8 +7,8 @@ import { validation } from '../middleware/joiValidation.js';
 
 export const signUp = async (req, res, next) => {
 
-    //----------------------Joi Validation-------------------------//
-    const validationResult = validation.validate({ name: req.body.name, contact: req.body.contact, email: req.body.email });
+        //----------------------Joi Validation-------------------------//
+        const validationResult = validation.validate({ name: req.body.name, contact: req.body.contact, email: req.body.email });
 
     if (validationResult.error == null) {
         try {
